@@ -1,5 +1,5 @@
 import {
-  store, BIOMES, SIZES, WEATHERS, AI_PRESETS, currentUser, userById, register, login, logout,
+  store, BIOMES, SIZES, WEATHERS, AI_PRESETS, currentUser, userById, register, login, logout, guestSession,
   defaultConfig, generateBiomeMap, mapToB64, b64ToMap, biomeStats, makePlanet, getPlanet,
   savePlanet, deletePlanet, duplicatePlanet, myPlanets, publishedPlanets, toggleLike, toggleFav,
   ensureSeeds, aiSettings, saveAiSettings, aiConfigured, exportData, importData, OFFICIAL_ID, uid,
@@ -552,8 +552,7 @@ function viewCreate() {
 
   document.getElementById('createSave').addEventListener('click', () => {
     const save = () => {
-      const user = currentUser();
-      if (!user) { openAuth('register', save); return; }
+      const user = currentUser() || guestSession();
       const planet = makePlanet(user.id, {
         name: draft.name.trim() || 'Безымянный мир',
         description: draft.description.trim(),

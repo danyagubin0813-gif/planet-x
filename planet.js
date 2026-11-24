@@ -401,7 +401,7 @@ export class PlanetStage {
     this.planet = planet;
     const config = planet.config;
     const map = b64ToMap(planet.biomeMap);
-    const W = this.quality === 'preview' ? 768 : 1536;
+    const W = this.quality === 'preview' ? 768 : 2048;
     const H = W / 2;
 
     const texSig = [config.surfaceColor, config.oceanColor, config.temp, config.oceans, config.oceanDepth, config.terrainRelief, config.vegetation, config.seed].join('|');
@@ -513,7 +513,7 @@ export class PlanetStage {
   }
 
   setZoom(z) {
-    this.zoomed = Math.max(2.6, Math.min(11, z));
+    this.zoomed = Math.max(1.22, Math.min(14, z));
     this.camera.position.z = this.zoomed;
   }
 
@@ -533,7 +533,7 @@ export class PlanetStage {
       vegetation: config.vegetation ?? 0.55,
       temp: config.temp ?? 14
     };
-    const segW = this.quality === 'preview' ? 128 : 320;
+    const segW = this.quality === 'preview' ? 128 : 512;
     const geo = new THREE.SphereGeometry(1, segW, segW / 2);
     const pos = geo.attributes.position;
     const arr = pos.array;

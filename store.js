@@ -161,6 +161,17 @@ export function logout() {
   store.save();
 }
 
+export function guestSession() {
+  let user = store.data.users.find(u => u.guest);
+  if (!user) {
+    user = { id: uid('u'), name: 'Гость', email: '', guest: true, bio: '', createdAt: nowISO() };
+    store.data.users.push(user);
+  }
+  store.data.session = user.id;
+  store.save();
+  return user;
+}
+
 /* ---------------- планеты ---------------- */
 
 function hash2(x, y, seed) {
