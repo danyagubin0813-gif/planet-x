@@ -1,3 +1,5 @@
+import { aiSettings } from './store.js';
+
 export const AI_NOT_CONFIGURED = 'AI_NOT_CONFIGURED';
 
 const DIET_LABEL = {
@@ -16,11 +18,13 @@ function aiError(message, code) {
 }
 
 export async function callAI(messages, opts = {}) {
-  const ai = opts.settings;
-  if (!ai || !ai.baseUrl || !ai.model || !ai.apiKey) {
+  const ai = opts.settings || aiSettings();
+  const needsKey = ai?.provider !== 'school';
+  if (!ai || !ai.baseUrl || (needsKey && !ai.model) || (needsKey && !ai.apiKey)) {
     throw aiError('ИИ не подключён. Укажите провайдера, модель и API-ключ в настройках ИИ.', AI_NOT_CONFIGURED);
   }
-  const url = ai.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+  const base = ai.baseUrl.replace(/\/+$/, '');
+  const url = /\/chat$/.test(base) ? base : base + '/chat/completions';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeout || 90000);
   try {
@@ -29,16 +33,16 @@ export async function callAI(messages, opts = {}) {
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + ai.apiKey,
-        'HTTP-Referer': location.origin,
-        'X-Title': 'PLANET X'
+        ...(ai.apiKey ? { 'Authorization': 'Bearer ' + ai.apiKey } : {})
       },
-      body: JSON.stringify({
-        model: ai.model,
-        temperature: opts.temperature ?? 0.95,
-        max_tokens: opts.maxTokens ?? 2000,
-        messages
-      })
+      body: JSON.stringify(needsKey
+        ? {
+            model: ai.model,
+            temperature: opts.temperature ?? 0.95,
+            max_tokens: opts.maxTokens ?? 2000,
+            messages
+          }
+        : { temperature: opts.temperature ?? 0.95, messages })
     });
     const text = await res.text();
     if (!res.ok) {
@@ -48,7 +52,7 @@ export async function callAI(messages, opts = {}) {
     }
     let data;
     try { data = JSON.parse(text); } catch (e) { throw aiError('API вернул не JSON'); }
-    const content = data.choices?.[0]?.message?.content;
+    const content = data.choices?.[0]?.message?.content ?? data.reply;
     if (!content) throw aiError('API вернул пустой ответ');
     return typeof content === 'string' ? content : JSON.stringify(content);
   } catch (e) {
@@ -179,13 +183,17 @@ export function buildSystemPrompt(planet) {
 7. Не добавляй пояснений вне JSON.`;
 }
 
+const SCHEMA_HINT = `Ответь ОДНИМ JSON-объектом ровно такой формы:
+{"reply":"краткий ответ","creatures":[{"name":"...","latin":"...","kind":"animal | plant | sapient","diet":"herbivore | carnivore | omnivore | autotroph | crystal | sapient","size":"...","color":"#RRGGBB","body":"...","habitat":"...","behavior":"...","defense":"...","food":"...","abilities":"...","description":"...","population":120,"traits":["..."]}],"foodChain":["...","..."],"civilization":null}
+Только JSON, без markdown и текста вокруг.`;
+
 export async function generateLife(prompt, planet, history = []) {
   const messages = [
     { role: 'system', content: buildSystemPrompt(planet) },
     ...history.slice(-6).map(m => ({ role: m.role === 'ai' ? 'assistant' : 'user', content: m.text })),
-    { role: 'user', content: prompt }
+    { role: 'user', content: prompt + '\n\n' + SCHEMA_HINT }
   ];
-  const raw = await callAI(messages, { temperature: 1, maxTokens: 2400 });
+  const raw = await callAI(messages, { temperature: 0.9, maxTokens: 2400 });
   const parsed = extractJson(raw);
   if (!parsed) {
     return { reply: raw.trim(), creatures: [], foodChain: [], civilization: null, raw: true };

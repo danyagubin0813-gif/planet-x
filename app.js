@@ -7,7 +7,6 @@ import {
 } from './store.js';
 import { PlanetStage, drawPlanetThumb } from './planet.js';
 import { SurfaceEditor } from './surface.js';
-import { WorldScene } from './world.js';
 import { drawCreature } from './art.js';
 import { generateLife, localCreatures, callAI, AI_NOT_CONFIGURED, dietLabel, normalizeCiv } from './ai.js';
 import { stepEcosystem, starterLife, foodChain, totalPopulation, aliveSpecies, planetConditions, speciesGroup } from './sim.js';
@@ -21,7 +20,6 @@ const artCache = new Map();
 
 const ui = {
   stage: null,
-  world: null,
   surface: null,
   simTimer: null,
   autoEco: false,
@@ -290,7 +288,7 @@ function viewHome() {
     </div>
     <div class="card card-pad">
       <h3 style="font-family:Unbounded;margin:0 0 8px;font-size:16px">ИИ — создатель жизни</h3>
-      <p class="muted small" style="line-height:1.6;margin:0">Опишите, кого хотите увидеть. ИИ придумает вид, среду обитания, питание и защиту. Подключите свой API — без него доступен только демо-генератор.</p>
+      <p class="muted small" style="line-height:1.6;margin:0">Опишите, кого хотите увидеть. ИИ придумает вид, среду обитания, питание и защиту. Свой ключ не нужен — но в настройках «API» можно подключить любой провайдер.</p>
     </div>
     <div class="card card-pad">
       <h3 style="font-family:Unbounded;margin:0 0 8px;font-size:16px">Живая экосистема</h3>
@@ -576,7 +574,6 @@ function viewCreate() {
 function planetTabs(planet, tab, owner) {
   const tabs = [
     ['overview', 'Обзор'],
-    ['world', '3D-мир'],
     owner ? ['settings', 'Параметры'] : null,
     ['surface', 'Поверхность'],
     ['life', owner ? 'ИИ — Создатель жизни' : 'Жизнь'],
@@ -644,7 +641,6 @@ function viewPlanet(id, tab) {
 
   const pane = document.getElementById('planetPane');
   if (tab === 'overview') renderOverview(pane, planet);
-  else if (tab === 'world') renderWorld(pane, planet);
   else if (tab === 'settings' && owner) renderSettings(pane, planet);
   else if (tab === 'surface') renderSurface(pane, planet, owner);
   else if (tab === 'life') renderLife(pane, planet, owner);
@@ -681,7 +677,6 @@ function renderOverview(pane, planet) {
       </div>
       <p class="muted" style="margin-top:20px;line-height:1.6">${esc(planet.description || 'Добавьте описание в параметрах планеты.')}</p>
       <div class="btn-row" style="margin-top:16px">
-        <button class="btn btn-primary btn-sm" id="descendBtn">Спуститься на поверхность</button>
         <a class="btn btn-soft btn-sm" href="#/planet/${planet.id}/surface">Редактировать поверхность</a>
         <a class="btn btn-soft btn-sm" href="#/planet/${planet.id}/life">Создать жизнь</a>
       </div>
@@ -692,58 +687,8 @@ function renderOverview(pane, planet) {
     <div style="font-size:13.5px;line-height:1.8">${planet.aiFoodChain.map(esc).join(' → ')}</div>
   </div>` : ''}`;
   try {
-    ui.stage = new PlanetStage(document.getElementById('planetStage'), planet, {
-      onDescend: () => descendToWorld(planet),
-      quality: 'high'
-    });
+    ui.stage = new PlanetStage(document.getElementById('planetStage'), planet, { quality: 'high' });
   } catch (e) { console.error(e); }
-  document.getElementById('descendBtn')?.addEventListener('click', () => descendToWorld(planet));
-}
-
-function descendToWorld(planet) {
-  if (!planet || document.querySelector('.warp')) return;
-  const overlay = document.createElement('div');
-  overlay.className = 'warp';
-  overlay.textContent = 'Спускаемся на поверхность…';
-  document.body.appendChild(overlay);
-  requestAnimationFrame(() => overlay.classList.add('on'));
-  setTimeout(() => {
-    location.hash = `#/planet/${planet.id}/world`;
-    setTimeout(() => {
-      overlay.classList.remove('on');
-      setTimeout(() => overlay.remove(), 500);
-    }, 400);
-  }, 480);
-}
-
-function renderWorld(pane, planet) {
-  const cfg = planet.config;
-  const animals = aliveSpecies(planet).filter(s => s.kind !== 'plant' && s.diet !== 'autotroph');
-  const weather = WEATHERS.find(w => w.id === cfg.weather)?.name || 'спокойная';
-  pane.innerHTML = `<div class="tab-pane">
-    <div class="btn-row" style="margin-bottom:12px;align-items:center">
-      <a class="btn btn-ghost btn-sm" href="#/planet/${planet.id}/overview">← На орбиту</a>
-      <span class="chip cyan">${animals.length} видов животных</span>
-      <span class="chip">${fmtNum.format(totalPopulation(planet))} особей</span>
-      ${(planet.civs || []).length ? `<span class="chip violet">${planet.civs.length} цивилизаций</span>` : ''}
-      <span class="tiny" style="margin-left:auto">${esc(weather)} · ${Math.round(cfg.temp)} °C · ${Number(cfg.gravity).toFixed(2)} g</span>
-    </div>
-    <div class="world-stage" id="worldStage">
-      <div class="world-hud">
-        <span class="chip cyan">${esc(planet.name)}</span>
-        <span class="chip">${esc(SIZE_SHORT[cfg.sizeId] || '')} · ${esc(weather)}</span>
-      </div>
-      ${animals.length ? '' : `<div class="world-empty"><b>Пока здесь тихо</b>Создайте животных в разделе «ИИ — Создатель жизни», добавьте их на планету — и они появятся в этом мире.</div>`}
-      <div class="world-hint">Перетаскивайте — обзор · колесо или пинч — приблизить</div>
-    </div>
-  </div>`;
-  try {
-    ui.world = new WorldScene(document.getElementById('worldStage'), planet);
-  } catch (e) {
-    console.error(e);
-    const stage = document.getElementById('worldStage');
-    if (stage) stage.innerHTML = '<div class="empty" style="margin:20px"><b>3D-мир недоступен</b>Браузер не поддерживает WebGL.</div>';
-  }
 }
 
 function renderSettings(pane, planet) {
@@ -941,7 +886,7 @@ function renderLife(pane, planet, owner) {
         <span class="status-dot ${aiConfigured() ? '' : 'off'}"></span>
         <div>
           <div style="font-weight:800;font-size:14px">ИИ — Создатель жизни</div>
-          <div class="tiny">${aiConfigured() ? 'Подключён ваш API' : 'Подключите API, чтобы получать настоящие ответы ИИ'}</div>
+          <div class="tiny">${aiConfigured() ? 'ИИ подключён' : 'Подключите API, чтобы получать настоящие ответы ИИ'}</div>
         </div>
         <div style="margin-left:auto;display:flex;gap:6px">
           <button class="btn btn-ghost btn-sm" id="aiSettingsBtn">API</button>
@@ -971,7 +916,7 @@ function renderLife(pane, planet, owner) {
         ${owner ? '' : '<p class="hint" style="margin-top:10px">Режим просмотра.</p>'}
       </div>
       <div class="panel card-pad" style="margin-top:14px">
-        <div class="small muted" style="line-height:1.65">ИИ сам придумывает виды, среду обитания, рацион и защиту. Ответы приходят с вашего API-ключа напрямую провайдеру. Без ключа доступен локальный демо-генератор.</div>
+        <div class="small muted" style="line-height:1.65">ИИ сам придумывает виды, среду обитания, рацион и защиту. Ключ не нужен: запросы идут через встроенный прокси. Свой провайдер и ключ можно указать в настройках «API».</div>
       </div>
     </aside>
   </div>
@@ -1575,7 +1520,7 @@ function aiSettingsModal() {
   const ai = aiSettings();
   const preset = AI_PRESETS.find(p => p.id === ai.provider) || AI_PRESETS[0];
   openModal(`<h2>Подключение ИИ</h2>
-    <p class="modal-sub">PLANET X использует настоящий внешний ИИ через OpenAI-совместимый API. Ключ хранится только в localStorage этого браузера и отправляется напрямую выбранному провайдеру. На публичном сайте используйте собственный ключ и не передавайте его другим.</p>
+    <p class="modal-sub">PLANET X использует настоящий внешний ИИ. По умолчанию запросы идут через встроенный прокси: ключ не нужен и в браузер не попадает. Можно указать своего провайдера и ключ — он хранится только в localStorage этого браузера.</p>
     <div class="field"><label>Провайдер</label>
       <select class="select" id="aiProvider">
         ${AI_PRESETS.map(p => `<option value="${p.id}" ${p.id === ai.provider ? 'selected' : ''}>${p.name}</option>`).join('')}
@@ -1607,7 +1552,7 @@ function aiSettingsModal() {
           apiKey: el.querySelector('#aiKey').value.trim()
         };
         const out = el.querySelector('#aiTestResult');
-        if (!settings.baseUrl || !settings.model || !settings.apiKey) {
+        if (!settings.baseUrl || (settings.provider !== 'school' && (!settings.model || !settings.apiKey))) {
           out.textContent = 'Заполните Base URL, модель и ключ.';
           out.style.color = '#ffb3ba';
           return;
@@ -1701,8 +1646,6 @@ function parseRoute() {
 function cleanup() {
   try { ui.stage?.dispose(); } catch (e) {}
   ui.stage = null;
-  try { ui.world?.dispose(); } catch (e) {}
-  ui.world = null;
   ui.surface = null;
   if (ui.simTimer) clearInterval(ui.simTimer);
   ui.simTimer = null;

@@ -33,6 +33,7 @@ export const SIZES = [
   { id: 'giant', name: 'Газовый гигант', value: 2.4 }
 ];
 export const AI_PRESETS = [
+  { id: 'school', name: 'Встроенный ИИ (без ключа)', baseUrl: 'https://shkolny-krug-ai.danya-gubin0813.workers.dev', model: 'auto' },
   { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
   { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'google/gemini-2.0-flash-001' },
   { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
@@ -53,7 +54,7 @@ function emptyState() {
     session: null,
     planets: [],
     settings: {
-      ai: { provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: '' }
+      ai: { provider: 'school', baseUrl: 'https://shkolny-krug-ai.danya-gubin0813.workers.dev', model: 'auto', apiKey: '' }
     }
   };
 }
@@ -67,10 +68,11 @@ function loadState() {
       settings: Object.assign(emptyState().settings, parsed.settings || {})
     });
     const ai = state.settings.ai;
-    if (ai && !ai.baseUrl && !ai.apiKey) {
-      ai.provider = 'openai';
-      ai.baseUrl = 'https://api.openai.com/v1';
-      ai.model = 'gpt-4o-mini';
+    if (ai && (!ai.baseUrl || (ai.provider === 'openai' && !ai.apiKey))) {
+      ai.provider = 'school';
+      ai.baseUrl = 'https://shkolny-krug-ai.danya-gubin0813.workers.dev';
+      ai.model = 'auto';
+      ai.apiKey = '';
     }
     return state;
   } catch (e) {
@@ -477,7 +479,8 @@ export function saveAiSettings(next) {
 
 export function aiConfigured() {
   const ai = aiSettings();
-  return Boolean(ai.baseUrl && ai.model && ai.apiKey);
+  if (!ai.baseUrl) return false;
+  return ai.provider === 'school' ? true : Boolean(ai.model && ai.apiKey);
 }
 
 /* ---------------- экспорт / импорт ---------------- */

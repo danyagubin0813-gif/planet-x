@@ -52,6 +52,15 @@ function fbm2(x, y, seed, oct = 4) {
   return val;
 }
 
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
 const BIOME_ELEV = [0.02, 0.30, 0.85, 0.20, 0.72, 0.55, 0.12, 0.45, 0.40, 0.35];
 const BIOME_ROUGH = [0.06, 0.92, 0.88, 0.84, 0.72, 0.34, 0.80, 0.28, 0.90, 0.58];
 const BIOME_VEG = [0, 0.95, 0.12, 0.04, 0.05, 0, 0.75, 0.05, 0, 0.45];
@@ -285,7 +294,7 @@ export class PlanetStage {
     this.quality = options.quality || 'preview';
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(38, 1, 0.05, 300);
+    this.camera = new THREE.PerspectiveCamera(38, 1, 0.008, 300);
     this.camera.position.set(0, 0, this.distance);
 
     try {
@@ -319,9 +328,14 @@ export class PlanetStage {
     this.stars = this.buildStars();
     this.scene.add(this.stars);
 
-    this.sphereMat = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0.04 });
-    this.sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), this.sphereMat);
-    this.tilt.add(this.sphere);
+    this.sphereMat = new THREE.MeshStandardMaterial({ roughness: 0.96, metalness: 0.02 });
+    this.body = new THREE.Group();
+    this.tilt.add(this.body);
+    this.sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16), this.sphereMat);
+    this.body.add(this.sphere);
+    this.ocean = null;
+    this.props = null;
+    this.oceanMat = new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.9, roughness: 0.18, metalness: 0.05 });
 
     this.cloudMat = new THREE.MeshStandardMaterial({
       transparent: true, opacity: 0, depthWrite: false, color: 0xffffff
@@ -387,26 +401,27 @@ export class PlanetStage {
     this.planet = planet;
     const config = planet.config;
     const map = b64ToMap(planet.biomeMap);
-    const W = this.quality === 'preview' ? 768 : 1024;
+    const W = this.quality === 'preview' ? 768 : 1536;
     const H = W / 2;
 
     const texSig = [config.surfaceColor, config.oceanColor, config.temp, config.oceans, config.oceanDepth, config.terrainRelief, config.vegetation, config.seed].join('|');
     if (initial || prevMap !== planet.biomeMap || texSig !== this.textureSig || !this.maps) {
       this.textureSig = texSig;
-      const maps = buildSurfaceMaps(config, map, W, H);
+      const data = buildSurfaceData(config, map, W, H);
       const disposeTex = t => t?.dispose();
-      disposeTex(this.surfaceTex); disposeTex(this.normalTex); disposeTex(this.roughTex);
-      this.surfaceTex = new THREE.CanvasTexture(maps.albedo);
+      disposeTex(this.surfaceTex); disposeTex(this.roughTex);
+      this.surfaceTex = new THREE.CanvasTexture(dataToCanvas(data.albedo, W, H));
       this.surfaceTex.colorSpace = THREE.SRGBColorSpace;
       this.surfaceTex.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-      this.normalTex = new THREE.CanvasTexture(maps.normal);
-      this.roughTex = new THREE.CanvasTexture(maps.roughness);
+      this.roughTex = new THREE.CanvasTexture(dataToCanvas(data.rough, W, H));
       this.sphereMat.map = this.surfaceTex;
-      this.sphereMat.normalMap = this.normalTex;
       this.sphereMat.roughnessMap = this.roughTex;
-      this.sphereMat.normalScale.set(0.85, 0.85);
       this.sphereMat.needsUpdate = true;
-      this.maps = maps;
+      this.maps = data;
+      this.oceanMat.color.set(config.oceanColor || '#1d5c96');
+      this.oceanMat.opacity = 0.82 + (config.oceanDepth ?? 0.55) * 0.16;
+      this.buildGlobe(config, map);
+      this.buildProps(config, map);
     }
 
     const cloudSig = [config.clouds, config.cloudColor, config.seed].join('|');
@@ -498,7 +513,7 @@ export class PlanetStage {
   }
 
   setZoom(z) {
-    this.zoomed = Math.max(1.62, Math.min(11, z));
+    this.zoomed = Math.max(2.6, Math.min(11, z));
     this.camera.position.z = this.zoomed;
   }
 
@@ -506,6 +521,170 @@ export class PlanetStage {
     const pts = [...this.pointers.values()];
     if (pts.length < 2) return 0;
     return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+  }
+
+  buildGlobe(config, map) {
+    const seed = config.seed || 1;
+    const relief = config.terrainRelief ?? 0.6;
+    this.globeCtx = {
+      seed, relief, map,
+      amp: 0.03 + relief * 0.1,
+      depth: config.oceanDepth ?? 0.55,
+      vegetation: config.vegetation ?? 0.55,
+      temp: config.temp ?? 14
+    };
+    const segW = this.quality === 'preview' ? 128 : 320;
+    const geo = new THREE.SphereGeometry(1, segW, segW / 2);
+    const pos = geo.attributes.position;
+    const arr = pos.array;
+    for (let i = 0; i < pos.count; i++) {
+      const x = arr[i * 3], y = arr[i * 3 + 1], z = arr[i * 3 + 2];
+      const len = Math.hypot(x, y, z) || 1;
+      const dx = x / len, dy = y / len, dz = z / len;
+      const u = Math.atan2(dz, dx) / (Math.PI * 2) + 0.5;
+      const v = 0.5 - Math.asin(Math.max(-1, Math.min(1, dy))) / Math.PI;
+      const e = this.elevAt(u, v);
+      const r = 1 + this.heightOf(e);
+      arr[i * 3] = dx * r; arr[i * 3 + 1] = dy * r; arr[i * 3 + 2] = dz * r;
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    this.sphere.geometry.dispose();
+    this.sphere.geometry = geo;
+
+    const oceanSeg = this.quality === 'preview' ? 96 : 256;
+    if (!this.ocean) {
+      this.ocean = new THREE.Mesh(new THREE.SphereGeometry(1, oceanSeg, oceanSeg / 2), this.oceanMat);
+      this.body.add(this.ocean);
+    }
+  }
+
+  elevAt(u, v) {
+    const c = this.globeCtx;
+    const b = sampleBiome(c.map, u, v);
+    const h1 = fbmCyl(u, v, c.seed, 5);
+    const detail = fbmCyl(u, v, c.seed + 5, 3, 3.7);
+    const ridge = Math.pow(Math.abs(detail * 2 - 1), 2);
+    const base = b.elev * 0.58 + h1 * 0.42 + ridge * 0.10 * c.relief;
+    const waterN = b.ocean + (h1 - 0.5) * 0.22;
+    return { base, water: smoothstep(0.42, 0.62, waterN), veg: b.veg, h1, detail };
+  }
+
+  heightOf(e) {
+    const c = this.globeCtx;
+    if (e.water >= 0.5) return -0.004 - c.depth * 0.02 - (0.5 - e.base) * c.amp * 0.6;
+    return 0.004 + Math.max(0, e.base - 0.45) * c.amp * 2.2;
+  }
+
+  buildProps(config, map) {
+    if (this.props) {
+      this.body.remove(this.props);
+      this.props.traverse(o => {
+        o.geometry?.dispose();
+        if (o.material && o.material !== this.oceanMat) o.material.dispose();
+      });
+    }
+    this.props = new THREE.Group();
+    this.creatures = [];
+    this.body.add(this.props);
+    if (this.quality === 'preview') return;
+
+    const rng = mulberry32((config.seed || 1) * 9176);
+    const veg = this.globeCtx.vegetation;
+    const up = new THREE.Vector3(0, 1, 0);
+    const dirAt = (u, v) => {
+      const phi = (v) * Math.PI, th = (u - 0.5) * Math.PI * 2;
+      return new THREE.Vector3(Math.cos(th) * Math.sin(phi), Math.cos(phi), Math.sin(th) * Math.sin(phi));
+    };
+    const uvOf = dir => [Math.atan2(dir.z, dir.x) / (Math.PI * 2) + 0.5, 0.5 - Math.asin(Math.max(-1, Math.min(1, dir.y))) / Math.PI];
+
+    const trees = [];
+    const rocks = [];
+    const citySpots = [];
+    for (let i = 0; i < 9000 && trees.length < 1200; i++) {
+      const u = rng(), v = 0.03 + rng() * 0.94;
+      const e = this.elevAt(u, v);
+      if (e.water > 0.35) continue;
+      const dir = dirAt(u, v);
+      if (e.veg * veg > 0.28) trees.push({ dir, h: this.heightOf(e), s: 0.7 + rng() * 0.9 });
+      else if (e.veg * veg < 0.06 && rng() < 0.08) rocks.push({ dir, h: this.heightOf(e), s: 0.5 + rng() * 0.8 });
+      if (citySpots.length < 1 && e.water < 0.05 && e.base > 0.52) citySpots.push({ dir, h: this.heightOf(e) });
+    }
+
+    if (trees.length) {
+      const geo = new THREE.ConeGeometry(0.008, 0.026, 5);
+      const mat = new THREE.MeshStandardMaterial({ color: '#2f6b3a', roughness: 0.9 });
+      const inst = new THREE.InstancedMesh(geo, mat, trees.length);
+      const dummy = new THREE.Object3D();
+      trees.forEach((t, i) => {
+        const r = 1 + t.h;
+        dummy.position.copy(t.dir).multiplyScalar(r + 0.009);
+        dummy.quaternion.setFromUnitVectors(up, t.dir);
+        dummy.scale.setScalar(t.s);
+        dummy.updateMatrix();
+        inst.setMatrixAt(i, dummy.matrix);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      this.props.add(inst);
+    }
+    if (rocks.length) {
+      const geo = new THREE.DodecahedronGeometry(0.008, 0);
+      const mat = new THREE.MeshStandardMaterial({ color: '#6b6155', roughness: 1 });
+      const inst = new THREE.InstancedMesh(geo, mat, rocks.length);
+      const dummy = new THREE.Object3D();
+      rocks.forEach((t, i) => {
+        dummy.position.copy(t.dir).multiplyScalar(1 + t.h + 0.003);
+        dummy.quaternion.setFromUnitVectors(up, t.dir);
+        dummy.scale.setScalar(t.s);
+        dummy.updateMatrix();
+        inst.setMatrixAt(i, dummy.matrix);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      this.props.add(inst);
+    }
+
+    const cities = Math.min(3, (this.planet.civs || []).length);
+    for (let c = 0; c < cities && c < citySpots.length; c++) {
+      const spot = citySpots[c];
+      const g = new THREE.Group();
+      const boxMat = new THREE.MeshStandardMaterial({ color: '#9aa4c4', roughness: 0.6, metalness: 0.35 });
+      const winMat = new THREE.MeshStandardMaterial({ color: '#ffd27a', emissive: '#ffb347', emissiveIntensity: 1.2 });
+      for (let i = 0; i < 5; i++) {
+        const h = 0.006 + rng() * 0.012;
+        const box = new THREE.Mesh(new THREE.BoxGeometry(0.007, h, 0.007), boxMat);
+        box.position.set((rng() - 0.5) * 0.03, h / 2, (rng() - 0.5) * 0.03);
+        g.add(box);
+        const win = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.0015, 0.004), winMat);
+        win.position.set(box.position.x, h * 0.72, box.position.z);
+        g.add(win);
+      }
+      const dome = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: '#a9b8ff', transparent: true, opacity: 0.3, roughness: 0.2 }));
+      g.add(dome);
+      g.position.copy(spot.dir).multiplyScalar(1 + spot.h);
+      g.quaternion.setFromUnitVectors(up, spot.dir);
+      this.props.add(g);
+    }
+
+    const species = this.planet.species || [];
+    if (!species.length) return;
+    const colorOf = s => {
+      const c = (s.color || s.palette?.[0] || '#c98b6b');
+      return c.startsWith('#') ? c : '#c98b6b';
+    };
+    species.slice(0, 6).forEach((sp, idx) => {
+      const u = rng(), v = 0.06 + rng() * 0.88;
+      const e = this.elevAt(u, v);
+      if (e.water > 0.2) return;
+      const dir = dirAt(u, v);
+      const mesh = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.004, 0.008, 4, 8), new THREE.MeshStandardMaterial({ color: colorOf(sp), roughness: 0.8 }));
+      mesh.add(body);
+      mesh.position.copy(dir).multiplyScalar(1 + this.heightOf(e) + 0.006);
+      mesh.quaternion.setFromUnitVectors(up, dir);
+      this.props.add(mesh);
+      this.creatures.push({ mesh, dir: dir.clone(), base: 1 + this.heightOf(e), phase: idx * 1.3, speed: 0.12 + rng() * 0.1 });
+    });
   }
 
   buildRings(config) {
@@ -571,7 +750,8 @@ export class PlanetStage {
     const dt = Math.min(0.05, this.clock.getDelta());
     const t = this.clock.elapsedTime;
     const spin = (this.planet?.config?.rotation ?? 1) * 0.09;
-    this.sphere.rotation.y += spin * dt;
+    const near = (this.zoomed || this.camera.position.z) < 1.5;
+    if (!near) this.body.rotation.y += spin * dt;
     this.clouds.rotation.y += spin * (this.planet?.config?.cloudSpeed ?? 1) * 0.75 * dt;
     this.stars.rotation.y += 0.006 * dt;
 
@@ -587,9 +767,19 @@ export class PlanetStage {
     for (const m of this.moons) m.pivot.rotation.y = t * m.speed + m.phase;
     if (this.ringMesh) this.ringMesh.rotation.z = t * 0.015;
 
-    if (this.onDescend && !this.descended && performance.now() > this.descendReadyAt && this.camera.position.z < 2.05) {
-      this.descended = true;
-      this.onDescend();
+    if (this.creatures?.length) {
+      const q = new THREE.Quaternion();
+      const upVec = new THREE.Vector3(0, 1, 0);
+      const axis = new THREE.Vector3(0, 1, 0);
+      for (const c of this.creatures) {
+        const ang = t * c.speed + c.phase;
+        const tiltAxis = new THREE.Vector3().crossVectors(c.dir, axis).normalize();
+        q.setFromAxisAngle(tiltAxis.lengthSq() > 0.0001 ? tiltAxis : new THREE.Vector3(1, 0, 0), 0.02);
+        const dir = c.dir.clone().applyQuaternion(q).normalize();
+        const wob = 0.0008 * Math.sin(ang * 6);
+        c.mesh.position.copy(dir).multiplyScalar(c.base + wob);
+        c.mesh.quaternion.setFromUnitVectors(upVec, dir);
+      }
     }
 
     this.renderer.render(this.scene, this.camera);
@@ -600,8 +790,13 @@ export class PlanetStage {
     cancelAnimationFrame(this.raf);
     this.observer?.disconnect();
     for (const d of this.disposables) d.dispose?.();
+    if (this.props) {
+      this.props.traverse(o => { o.geometry?.dispose(); if (o.material) o.material.dispose(); });
+    }
+    this.ocean?.geometry.dispose();
+    this.oceanMat.dispose();
     this.sphere.geometry.dispose(); this.sphereMat.dispose();
-    this.surfaceTex?.dispose(); this.normalTex?.dispose(); this.roughTex?.dispose();
+    this.surfaceTex?.dispose(); this.roughTex?.dispose();
     this.clouds.geometry.dispose(); this.cloudMat.dispose(); this.cloudTex?.dispose();
     this.atmo.geometry.dispose(); this.atmoMat.dispose();
     this.glowMat.map?.dispose(); this.glowMat.dispose();
