@@ -33,8 +33,8 @@ export const SIZES = [
   { id: 'giant', name: 'Газовый гигант', value: 2.4 }
 ];
 export const AI_PRESETS = [
-  { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'google/gemini-2.0-flash-001' },
   { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'google/gemini-2.0-flash-001' },
   { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
   { id: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
   { id: 'local', name: 'Локальный прокси', baseUrl: 'http://localhost:8787/v1', model: 'local-model' },
@@ -53,7 +53,7 @@ function emptyState() {
     session: null,
     planets: [],
     settings: {
-      ai: { provider: 'openrouter', baseUrl: '', model: '', apiKey: '' }
+      ai: { provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', apiKey: '' }
     }
   };
 }
@@ -63,9 +63,16 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyState();
     const parsed = JSON.parse(raw);
-    return Object.assign(emptyState(), parsed, {
+    const state = Object.assign(emptyState(), parsed, {
       settings: Object.assign(emptyState().settings, parsed.settings || {})
     });
+    const ai = state.settings.ai;
+    if (ai && !ai.baseUrl && !ai.apiKey) {
+      ai.provider = 'openai';
+      ai.baseUrl = 'https://api.openai.com/v1';
+      ai.model = 'gpt-4o-mini';
+    }
+    return state;
   } catch (e) {
     console.warn('Не удалось прочитать хранилище', e);
     return emptyState();
@@ -182,16 +189,26 @@ export function defaultConfig(seed = Math.floor(Math.random() * 1e6)) {
     sizeId: 'earth',
     size: 1,
     surfaceColor: '#6f5a44',
+    oceanColor: '#1d5c96',
     oceans: 0.42,
+    oceanDepth: 0.55,
+    terrainRelief: 0.6,
+    vegetation: 0.55,
     skyColor: '#6fc3ff',
     atmosphere: true,
+    atmosphereDensity: 0.55,
     clouds: 0.3,
+    cloudColor: '#ffffff',
+    cloudSpeed: 1,
     weather: 'calm',
     temp: 14,
     gravity: 1,
     rings: false,
     ringColor: '#b9a6ff',
+    ringThickness: 0.55,
+    ringOpacity: 0.75,
     moons: 1,
+    moonSize: 1,
     rotation: 1,
     axialTilt: 12
   };

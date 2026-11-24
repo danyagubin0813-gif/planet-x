@@ -7,6 +7,7 @@ import {
 } from './store.js';
 import { PlanetStage, drawPlanetThumb } from './planet.js';
 import { SurfaceEditor } from './surface.js';
+import { WorldScene } from './world.js';
 import { drawCreature } from './art.js';
 import { generateLife, localCreatures, callAI, AI_NOT_CONFIGURED, dietLabel, normalizeCiv } from './ai.js';
 import { stepEcosystem, starterLife, foodChain, totalPopulation, aliveSpecies, planetConditions, speciesGroup } from './sim.js';
@@ -20,6 +21,7 @@ const artCache = new Map();
 
 const ui = {
   stage: null,
+  world: null,
   surface: null,
   simTimer: null,
   autoEco: false,
@@ -300,7 +302,7 @@ function viewHome() {
   `;
 
   const stageEl = document.getElementById('heroStage');
-  try { ui.stage = new PlanetStage(stageEl, heroPlanet); } catch (e) { console.error(e); }
+  try { ui.stage = new PlanetStage(stageEl, heroPlanet, { quality: 'high' }); } catch (e) { console.error(e); }
   paintThumbs(appEl);
   bindCardActions(appEl);
   const homeLogin = document.getElementById('homeLogin');
@@ -310,73 +312,135 @@ function viewHome() {
 /* ---------------- создание планеты ---------------- */
 
 function fmtCfg(key, v) {
-  if (key === 'oceans' || key === 'clouds') return Math.round(v * 100) + '%';
+  if (['oceans', 'clouds', 'oceanDepth', 'terrainRelief', 'vegetation', 'atmosphereDensity', 'ringThickness', 'ringOpacity'].includes(key)) return Math.round(v * 100) + '%';
   if (key === 'temp') return Math.round(v) + ' °C';
   if (key === 'gravity') return Number(v).toFixed(2) + ' g';
   if (key === 'moons') return v + ' шт.';
-  if (key === 'rotation') return Number(v).toFixed(1) + '×';
+  if (key === 'rotation' || key === 'cloudSpeed' || key === 'moonSize') return Number(v).toFixed(1) + '×';
   if (key === 'axialTilt') return Math.round(v) + '°';
   return v;
 }
 
 function configSectionsHTML(config) {
+  const oceanColor = config.oceanColor ?? '#1d5c96';
+  const oceanDepth = config.oceanDepth ?? 0.55;
+  const terrainRelief = config.terrainRelief ?? 0.6;
+  const vegetation = config.vegetation ?? 0.55;
+  const atmosphereDensity = config.atmosphereDensity ?? 0.55;
+  const cloudColor = config.cloudColor ?? '#ffffff';
+  const cloudSpeed = config.cloudSpeed ?? 1;
+  const ringThickness = config.ringThickness ?? 0.55;
+  const ringOpacity = config.ringOpacity ?? 0.75;
+  const moonSize = config.moonSize ?? 1;
   return `
   <section class="form-section panel">
-    <h3><span class="dot"></span>Размер и поверхность</h3>
+    <h3><span class="dot"></span>Размер планеты</h3>
     <div class="field">
-      <label>Размер планеты</label>
+      <label>Тип мира</label>
       <select class="select" data-cfg="sizeId">
         ${SIZES.map(s => `<option value="${s.id}" ${config.sizeId === s.id ? 'selected' : ''}>${s.name}</option>`).join('')}
       </select>
     </div>
+    <p class="hint">От астероида до газового гиганта: размер влияет на силу тяжести, толщину атмосферы и масштаб поверхности.</p>
+  </section>
+
+  <section class="form-section panel">
+    <h3><span class="dot"></span>Поверхность и океан</h3>
     <div class="form-grid">
-      <div class="field"><label>Цвет поверхности</label><input type="color" data-cfg="surfaceColor" value="${config.surfaceColor}"></div>
+      <div class="field"><label>Цвет суши</label><input type="color" data-cfg="surfaceColor" value="${config.surfaceColor}"></div>
+      <div class="field"><label>Цвет океана</label><input type="color" data-cfg="oceanColor" value="${oceanColor}"></div>
       <div class="field">
-        <label>Наличие океанов <span class="val" data-val="oceans">${fmtCfg('oceans', config.oceans)}</span></label>
+        <label>Площадь океанов <span class="val" data-val="oceans">${fmtCfg('oceans', config.oceans)}</span></label>
         <input type="range" min="0" max="1" step="0.01" data-cfg="oceans" value="${config.oceans}">
+      </div>
+      <div class="field">
+        <label>Глубина океана <span class="val" data-val="oceanDepth">${fmtCfg('oceanDepth', oceanDepth)}</span></label>
+        <input type="range" min="0" max="1" step="0.01" data-cfg="oceanDepth" value="${oceanDepth}">
+      </div>
+      <div class="field">
+        <label>Рельеф суши <span class="val" data-val="terrainRelief">${fmtCfg('terrainRelief', terrainRelief)}</span></label>
+        <input type="range" min="0" max="1" step="0.01" data-cfg="terrainRelief" value="${terrainRelief}">
+      </div>
+      <div class="field">
+        <label>Растительность <span class="val" data-val="vegetation">${fmtCfg('vegetation', vegetation)}</span></label>
+        <input type="range" min="0" max="1" step="0.01" data-cfg="vegetation" value="${vegetation}">
       </div>
     </div>
   </section>
 
   <section class="form-section panel">
-    <h3><span class="dot"></span>Атмосфера и климат</h3>
+    <h3><span class="dot"></span>Атмосфера и облака</h3>
     <div class="form-grid">
       <div class="field"><label>Цвет неба</label><input type="color" data-cfg="skyColor" value="${config.skyColor}"></div>
+      <div class="field">
+        <label>Плотность атмосферы <span class="val" data-val="atmosphereDensity">${fmtCfg('atmosphereDensity', atmosphereDensity)}</span></label>
+        <input type="range" min="0" max="1" step="0.01" data-cfg="atmosphereDensity" value="${atmosphereDensity}">
+      </div>
+      <div class="field">
+        <label>Облачность <span class="val" data-val="clouds">${fmtCfg('clouds', config.clouds)}</span></label>
+        <input type="range" min="0" max="1" step="0.01" data-cfg="clouds" value="${config.clouds}">
+      </div>
+      <div class="field"><label>Цвет облаков</label><input type="color" data-cfg="cloudColor" value="${cloudColor}"></div>
+      <div class="field">
+        <label>Скорость облаков <span class="val" data-val="cloudSpeed">${fmtCfg('cloudSpeed', cloudSpeed)}</span></label>
+        <input type="range" min="0" max="3" step="0.1" data-cfg="cloudSpeed" value="${cloudSpeed}">
+      </div>
       <div class="field"><label>Погода</label><select class="select" data-cfg="weather">
         ${WEATHERS.map(w => `<option value="${w.id}" ${config.weather === w.id ? 'selected' : ''}>${w.name}</option>`).join('')}
       </select></div>
-      <div class="field">
-        <label>Облака <span class="val" data-val="clouds">${fmtCfg('clouds', config.clouds)}</span></label>
-        <input type="range" min="0" max="1" step="0.01" data-cfg="clouds" value="${config.clouds}">
-      </div>
+    </div>
+    <label class="switch"><input type="checkbox" data-cfg="atmosphere" ${config.atmosphere ? 'checked' : ''}><span class="track"></span>Атмосфера и свечение</label>
+  </section>
+
+  <section class="form-section panel">
+    <h3><span class="dot"></span>Климат</h3>
+    <div class="form-grid">
       <div class="field">
         <label>Температура <span class="val" data-val="temp">${fmtCfg('temp', config.temp)}</span></label>
         <input type="range" min="-80" max="120" step="1" data-cfg="temp" value="${config.temp}">
-      </div>
-      <div class="field">
-        <label>Гравитация <span class="val" data-val="gravity">${fmtCfg('gravity', config.gravity)}</span></label>
-        <input type="range" min="0.2" max="3" step="0.01" data-cfg="gravity" value="${config.gravity}">
       </div>
       <div class="field">
         <label>Наклон оси <span class="val" data-val="axialTilt">${fmtCfg('axialTilt', config.axialTilt)}</span></label>
         <input type="range" min="0" max="60" step="1" data-cfg="axialTilt" value="${config.axialTilt}">
       </div>
     </div>
-    <label class="switch"><input type="checkbox" data-cfg="atmosphere" ${config.atmosphere ? 'checked' : ''}><span class="track"></span>Атмосфера и свечение</label>
+    <p class="hint">Температура задаёт льды, пустыни и цвет поверхности, наклон оси — сезоны и положение полюсов.</p>
   </section>
 
   <section class="form-section panel">
-    <h3><span class="dot"></span>Космос</h3>
+    <h3><span class="dot"></span>Гравитация и вращение</h3>
     <div class="form-grid">
       <div class="field">
-        <label>Спутники <span class="val" data-val="moons">${fmtCfg('moons', config.moons)}</span></label>
-        <input type="range" min="0" max="4" step="1" data-cfg="moons" value="${config.moons}">
+        <label>Гравитация <span class="val" data-val="gravity">${fmtCfg('gravity', config.gravity)}</span></label>
+        <input type="range" min="0.2" max="3" step="0.01" data-cfg="gravity" value="${config.gravity}">
       </div>
       <div class="field">
         <label>Скорость вращения <span class="val" data-val="rotation">${fmtCfg('rotation', config.rotation)}</span></label>
         <input type="range" min="0" max="3" step="0.1" data-cfg="rotation" value="${config.rotation}">
       </div>
+    </div>
+  </section>
+
+  <section class="form-section panel">
+    <h3><span class="dot"></span>Кольца и спутники</h3>
+    <div class="form-grid">
       <div class="field"><label>Цвет колец</label><input type="color" data-cfg="ringColor" value="${config.ringColor}"></div>
+      <div class="field">
+        <label>Ширина колец <span class="val" data-val="ringThickness">${fmtCfg('ringThickness', ringThickness)}</span></label>
+        <input type="range" min="0.05" max="1" step="0.01" data-cfg="ringThickness" value="${ringThickness}">
+      </div>
+      <div class="field">
+        <label>Яркость колец <span class="val" data-val="ringOpacity">${fmtCfg('ringOpacity', ringOpacity)}</span></label>
+        <input type="range" min="0" max="1" step="0.01" data-cfg="ringOpacity" value="${ringOpacity}">
+      </div>
+      <div class="field">
+        <label>Спутники <span class="val" data-val="moons">${fmtCfg('moons', config.moons)}</span></label>
+        <input type="range" min="0" max="4" step="1" data-cfg="moons" value="${config.moons}">
+      </div>
+      <div class="field">
+        <label>Размер спутников <span class="val" data-val="moonSize">${fmtCfg('moonSize', moonSize)}</span></label>
+        <input type="range" min="0.4" max="2" step="0.1" data-cfg="moonSize" value="${moonSize}">
+      </div>
     </div>
     <label class="switch"><input type="checkbox" data-cfg="rings" ${config.rings ? 'checked' : ''}><span class="track"></span>Кольца планеты</label>
   </section>`;
@@ -445,7 +509,7 @@ function viewCreate() {
           <textarea class="textarea" id="pDesc" maxlength="400" placeholder="Чем этот мир отличается от других?">${esc(draft.description)}</textarea></div>
       </section>
       ${configSectionsHTML(draft.config)}
-      <div class="hint">Подсказка: океаны влияют на генерацию карты, а цвет поверхности задаёт оттенок суши. Точную карту можно нарисовать после создания планеты.</div>
+      <div class="hint">Подсказка: океаны, рельеф и растительность влияют на генерацию карты. После сохранения можно спуститься на поверхность и увидеть мир в 3D.</div>
     </div>
     <aside class="preview-col">
       <div class="preview-stage" id="createStage"></div>
@@ -512,6 +576,7 @@ function viewCreate() {
 function planetTabs(planet, tab, owner) {
   const tabs = [
     ['overview', 'Обзор'],
+    ['world', '3D-мир'],
     owner ? ['settings', 'Параметры'] : null,
     ['surface', 'Поверхность'],
     ['life', owner ? 'ИИ — Создатель жизни' : 'Жизнь'],
@@ -579,6 +644,7 @@ function viewPlanet(id, tab) {
 
   const pane = document.getElementById('planetPane');
   if (tab === 'overview') renderOverview(pane, planet);
+  else if (tab === 'world') renderWorld(pane, planet);
   else if (tab === 'settings' && owner) renderSettings(pane, planet);
   else if (tab === 'surface') renderSurface(pane, planet, owner);
   else if (tab === 'life') renderLife(pane, planet, owner);
@@ -593,7 +659,10 @@ function renderOverview(pane, planet) {
   const civs = planet.civs || [];
   pane.innerHTML = `
   <div class="planet-hero">
-    <div class="stage-wrap" id="planetStage"></div>
+    <div>
+      <div class="stage-wrap" id="planetStage"></div>
+      <p class="hint" style="margin-top:9px">Приблизьте планету колесом или пинчем — и спуститесь на поверхность.</p>
+    </div>
     <div>
       <div class="stat-row">
         <div class="stat"><b>${SIZE_SHORT[planet.config.sizeId] || '—'}</b><span>размер</span></div>
@@ -612,6 +681,7 @@ function renderOverview(pane, planet) {
       </div>
       <p class="muted" style="margin-top:20px;line-height:1.6">${esc(planet.description || 'Добавьте описание в параметрах планеты.')}</p>
       <div class="btn-row" style="margin-top:16px">
+        <button class="btn btn-primary btn-sm" id="descendBtn">Спуститься на поверхность</button>
         <a class="btn btn-soft btn-sm" href="#/planet/${planet.id}/surface">Редактировать поверхность</a>
         <a class="btn btn-soft btn-sm" href="#/planet/${planet.id}/life">Создать жизнь</a>
       </div>
@@ -621,7 +691,59 @@ function renderOverview(pane, planet) {
     <div class="small muted" style="margin-bottom:8px">Пищевая цепочка от ИИ</div>
     <div style="font-size:13.5px;line-height:1.8">${planet.aiFoodChain.map(esc).join(' → ')}</div>
   </div>` : ''}`;
-  try { ui.stage = new PlanetStage(document.getElementById('planetStage'), planet); } catch (e) { console.error(e); }
+  try {
+    ui.stage = new PlanetStage(document.getElementById('planetStage'), planet, {
+      onDescend: () => descendToWorld(planet),
+      quality: 'high'
+    });
+  } catch (e) { console.error(e); }
+  document.getElementById('descendBtn')?.addEventListener('click', () => descendToWorld(planet));
+}
+
+function descendToWorld(planet) {
+  if (!planet || document.querySelector('.warp')) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'warp';
+  overlay.textContent = 'Спускаемся на поверхность…';
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('on'));
+  setTimeout(() => {
+    location.hash = `#/planet/${planet.id}/world`;
+    setTimeout(() => {
+      overlay.classList.remove('on');
+      setTimeout(() => overlay.remove(), 500);
+    }, 400);
+  }, 480);
+}
+
+function renderWorld(pane, planet) {
+  const cfg = planet.config;
+  const animals = aliveSpecies(planet).filter(s => s.kind !== 'plant' && s.diet !== 'autotroph');
+  const weather = WEATHERS.find(w => w.id === cfg.weather)?.name || 'спокойная';
+  pane.innerHTML = `<div class="tab-pane">
+    <div class="btn-row" style="margin-bottom:12px;align-items:center">
+      <a class="btn btn-ghost btn-sm" href="#/planet/${planet.id}/overview">← На орбиту</a>
+      <span class="chip cyan">${animals.length} видов животных</span>
+      <span class="chip">${fmtNum.format(totalPopulation(planet))} особей</span>
+      ${(planet.civs || []).length ? `<span class="chip violet">${planet.civs.length} цивилизаций</span>` : ''}
+      <span class="tiny" style="margin-left:auto">${esc(weather)} · ${Math.round(cfg.temp)} °C · ${Number(cfg.gravity).toFixed(2)} g</span>
+    </div>
+    <div class="world-stage" id="worldStage">
+      <div class="world-hud">
+        <span class="chip cyan">${esc(planet.name)}</span>
+        <span class="chip">${esc(SIZE_SHORT[cfg.sizeId] || '')} · ${esc(weather)}</span>
+      </div>
+      ${animals.length ? '' : `<div class="world-empty"><b>Пока здесь тихо</b>Создайте животных в разделе «ИИ — Создатель жизни», добавьте их на планету — и они появятся в этом мире.</div>`}
+      <div class="world-hint">Перетаскивайте — обзор · колесо или пинч — приблизить</div>
+    </div>
+  </div>`;
+  try {
+    ui.world = new WorldScene(document.getElementById('worldStage'), planet);
+  } catch (e) {
+    console.error(e);
+    const stage = document.getElementById('worldStage');
+    if (stage) stage.innerHTML = '<div class="empty" style="margin:20px"><b>3D-мир недоступен</b>Браузер не поддерживает WebGL.</div>';
+  }
 }
 
 function renderSettings(pane, planet) {
@@ -1579,6 +1701,8 @@ function parseRoute() {
 function cleanup() {
   try { ui.stage?.dispose(); } catch (e) {}
   ui.stage = null;
+  try { ui.world?.dispose(); } catch (e) {}
+  ui.world = null;
   ui.surface = null;
   if (ui.simTimer) clearInterval(ui.simTimer);
   ui.simTimer = null;
