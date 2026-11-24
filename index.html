@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PLANET X — конструктор вселенных</title>
+<meta name="description" content="PLANET X — создай собственную планету, насели её уникальными существами с помощью ИИ и наблюдай за развитием жизни.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "./three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="starfield" aria-hidden="true"></canvas>
+
+<header class="topbar">
+  <a class="brand" href="#/" aria-label="PLANET X — на главную">
+    <span class="brand-mark"></span>
+    <span class="brand-name">PLANET<span class="brand-x">X</span></span>
+  </a>
+  <nav class="nav" id="mainNav" aria-label="Основная навигация">
+    <a href="#/" data-route="home">Главная</a>
+    <a href="#/create" data-route="create">Создать</a>
+    <a href="#/planets" data-route="planets">Мои планеты</a>
+    <a href="#/gallery" data-route="gallery">Галерея</a>
+  </nav>
+  <div class="topbar-right">
+    <button class="icon-btn" id="btnAiSettings" title="Настройки ИИ" aria-label="Настройки ИИ">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a5 5 0 0 0-5 5v2.1A4 4 0 0 0 4 13v2a4 4 0 0 0 3 3.87V20a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1.13A4 4 0 0 0 20 15v-2a4 4 0 0 0-3-3.9V7a5 5 0 0 0-5-5Zm-3 5a3 3 0 0 1 6 0v2h-6V7Zm3 9a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z"/></svg>
+    </button>
+    <div id="userBox" class="user-box"></div>
+    <button class="burger" id="burger" aria-label="Меню" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</header>
+
+<main id="app" class="app"></main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-brand">PLANET<span>X</span></div>
+    <p>Конструктор планет и вселенных. Данные хранятся в вашем браузере.</p>
+    <div class="footer-links">
+      <a href="#/gallery">Галерея</a>
+      <a href="#/planets">Мои планеты</a>
+      <button class="linklike" id="btnAbout">О системе</button>
+    </div>
+  </div>
+</footer>
+
+<div class="modal-root" id="modalRoot" aria-live="polite"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="loader" id="globalLoader" hidden><span class="spinner"></span></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
